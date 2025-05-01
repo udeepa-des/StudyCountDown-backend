@@ -7,14 +7,32 @@ const jwt = require("jsonwebtoken");
 
 const app = express();
 
-// CORS Configuration
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+// Enhanced CORS Configuration
+const allowedOrigins = [
+  "https://mindstreamer.netlify.app",
+  "http://localhost:3000",
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // Enable preflight for all routes
 app.use(express.json());
 
 // MongoDB Connection with Retry Logic
@@ -40,7 +58,7 @@ const connectWithRetry = () => {
     });
 };
 
-let retries = 5; // Note: Fixed typo from 'retries' to 'retries'
+let retries = 5;
 connectWithRetry();
 
 // User Model
@@ -151,6 +169,12 @@ app.use((req, res, next) => {
 // Error Handling Middleware (must be last)
 app.use((err, req, res, next) => {
   console.error(err.stack);
+
+  // Handle CORS errors specifically
+  if (err.message === "Not allowed by CORS") {
+    return res.status(403).json({ error: "CORS policy: Origin not allowed" });
+  }
+
   res.status(500).json({ error: "Internal server error" });
 });
 
