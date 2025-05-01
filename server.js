@@ -235,6 +235,34 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Update target date
+app.put("/api/target-date", authenticate, async (req, res) => {
+  try {
+    const { targetDate } = req.body;
+    req.user.targetDate = targetDate;
+    await req.user.save();
+    res.json({ message: "Target date updated successfully", targetDate });
+  } catch (err) {
+    console.error("Target date update error:", err);
+    res.status(500).json({ error: "Error updating target date" });
+  }
+});
+
+// Update study plans
+app.put("/api/plans", authenticate, async (req, res) => {
+  try {
+    req.user.studyPlans = req.body;
+    await req.user.save();
+    res.json({
+      message: "Study plans updated successfully",
+      plans: req.user.studyPlans,
+    });
+  } catch (err) {
+    console.error("Study plans update error:", err);
+    res.status(500).json({ error: "Error updating study plans" });
+  }
+});
+
 // Request Logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
