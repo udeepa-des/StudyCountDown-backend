@@ -6,7 +6,13 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.use(express.json());
 
 // MongoDB Connection (using MongoDB Atlas free tier)
@@ -14,11 +20,14 @@ mongoose
   .connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    connectTimeoutMS: 30000, // Increase connection timeout to 30 seconds
-    socketTimeoutMS: 30000, // Increase socket timeout to 30 seconds
+    serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
   })
   .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err.message));
+  .catch((err) => {
+    console.error("MongoDB connection error:", err.message);
+    process.exit(1); // Exit if DB connection fails
+  });
 
 // User Model
 const UserSchema = new mongoose.Schema({
@@ -70,16 +79,23 @@ app.post("/api/register", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).send("Invalid credentials");
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).send("Invalid credentials");
+    if (!isMatch) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET);
-    res.send({ user, token });
+    res.json({ user, token });
   } catch (err) {
-    res.status(400).send(err.message);
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Server error during login" });
   }
 });
 
@@ -97,6 +113,41 @@ app.post("/api/plans", authenticate, async (req, res) => {
   }
 });
 
+let retries = 5;
+const connectWithRetry = () => {
+  mongoose
+    .connect(process.env.MONGODB_URI, {
+      /* options */
+    })
+    .catch((err) => {
+      if (retries-- > 0) {
+        console.log(`Retrying connection... (${retries} left)`);
+        setTimeout(connectWithRetry, 5000);
+      } else {
+        console.error("Failed to connect to MongoDB after retries");
+        process.exit(1);
+      }
+    });
+};
+connectWithRetry();
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "OK",
+    dbState: mongoose.connection.readyState,
+  });
+});
+
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: "Something broke!" });
+});
