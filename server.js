@@ -66,6 +66,7 @@ const UserSchema = new mongoose.Schema(
     name: String,
     email: { type: String, unique: true, required: true },
     password: { type: String, required: true },
+    avatar: String,
     studyPlans: [
       {
         subject: String,
@@ -180,6 +181,7 @@ app.post("/api/login", async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        avatar: user.avatar,
       },
       token,
     });
@@ -189,12 +191,39 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+// Add this route to your server
+app.put("/api/user/settings", authenticate, async (req, res) => {
+  try {
+    const { name, avatar, emailNotifications, mobileNotifications } = req.body;
+
+    if (name) req.user.name = name;
+    if (avatar) req.user.avatar = avatar;
+    // Add other settings you want to update
+
+    await req.user.save();
+
+    res.json({
+      message: "Settings updated successfully",
+      user: {
+        _id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        avatar: req.user.avatar,
+      },
+    });
+  } catch (err) {
+    console.error("Settings update error:", err);
+    res.status(500).json({ error: "Error updating settings" });
+  }
+});
+
 app.get("/api/user", authenticate, async (req, res) => {
   try {
     res.json({
       _id: req.user._id,
       name: req.user.name,
       email: req.user.email,
+      avatar: req.user.avatar,
       studyPlans: req.user.studyPlans,
       targetDate: req.user.targetDate,
     });
