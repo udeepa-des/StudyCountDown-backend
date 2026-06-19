@@ -12,14 +12,19 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "agenda": "^5.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "handlebars": "^4.7.8",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.16.0",
     "mongoose": "^8.14.0",
-    "path-to-regexp": "^8.2.0"
+    "nodemailer": "^7.0.4",
+    "path-to-regexp": "^8.2.0",
+    "twilio": "^5.7.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
