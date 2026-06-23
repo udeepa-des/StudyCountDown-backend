@@ -496,6 +496,32 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Add target date
+app.post("/api/target-date", authenticate, async (req, res) => {
+  try {
+    const { targetDate, targetName } = req.body;
+
+    if (!targetDate || !targetName) {
+      return res
+        .status(400)
+        .json({ error: "Both target date and name are required" });
+    }
+
+    req.user.targetDate = targetDate;
+    req.user.targetName = targetName;
+    await req.user.save();
+
+    res.json({
+      message: "Target added successfully",
+      targetDate,
+      targetName,
+    });
+  } catch (err) {
+    console.error("Target add error:", err);
+    res.status(500).json({ error: "Error adding target" });
+  }
+});
+
 // Update target date
 app.put("/api/target-date", authenticate, async (req, res) => {
   try {
