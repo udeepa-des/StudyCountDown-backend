@@ -27,7 +27,7 @@ const corsOptions = {
       callback(new Error("Not allowed by CORS"));
     }
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
   optionsSuccessStatus: 200,
@@ -61,18 +61,21 @@ const connectWithRetry = () => {
 connectWithRetry();
 
 //for cleaning up guest accounts
-setInterval(async () => {
-  try {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const result = await User.deleteMany({
-      isGuest: true,
-      createdAt: { $lt: oneDayAgo },
-    });
-    console.log(`Cleaned up ${result.deletedCount} guest accounts`);
-  } catch (err) {
-    console.error("Guest account cleanup error:", err);
-  }
-}, 24 * 60 * 60 * 1000);
+setInterval(
+  async () => {
+    try {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const result = await User.deleteMany({
+        isGuest: true,
+        createdAt: { $lt: oneDayAgo },
+      });
+      console.log(`Cleaned up ${result.deletedCount} guest accounts`);
+    } catch (err) {
+      console.error("Guest account cleanup error:", err);
+    }
+  },
+  24 * 60 * 60 * 1000,
+);
 
 // User Model
 const UserSchema = new mongoose.Schema(
@@ -95,7 +98,7 @@ const UserSchema = new mongoose.Schema(
     targetName: String,
     isGuest: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // StudyPlan Model
@@ -125,6 +128,10 @@ const StudyPlanSchema = new mongoose.Schema({
   progress: {
     type: Number,
     default: 0,
+  },
+  studiedDays: {
+    type: [String],
+    default: [],
   },
   owner: {
     type: mongoose.Schema.Types.ObjectId,
@@ -458,7 +465,7 @@ app.post("/api/plans", authenticate, async (req, res) => {
     await User.findByIdAndUpdate(
       req.user._id,
       { $push: { studyPlans: savedPlan._id } },
-      { new: true, useFindAndModify: false } // optional, depending on your Mongoose version
+      { new: true, useFindAndModify: false }, // optional, depending on your Mongoose version
     );
 
     res.status(201).json(savedPlan);
@@ -571,6 +578,31 @@ app.delete("/api/target-date", authenticate, async (req, res) => {
   }
 });
 
+// Mark today as studied
+app.patch("/api/plans/:planId/mark-day", authenticate, async (req, res) => {
+  try {
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    const updatedPlan = await StudyPlan.findOneAndUpdate(
+      { _id: req.params.planId, owner: req.user._id },
+      { $addToSet: { studiedDays: dateStr } }, // $addToSet = no duplicates ever
+      { new: true },
+    );
+
+    if (!updatedPlan) {
+      return res
+        .status(404)
+        .json({ error: "Plan not found or no permission." });
+    }
+
+    res.json(updatedPlan);
+  } catch (err) {
+    console.error("Mark day error:", err);
+    res.status(500).json({ error: "Error marking day as studied" });
+  }
+});
+
 // Update study plans
 app.put("/api/plans/:planId", authenticate, async (req, res) => {
   try {
@@ -583,7 +615,7 @@ app.put("/api/plans/:planId", authenticate, async (req, res) => {
     const updatedPlan = await StudyPlan.findOneAndUpdate(
       { _id: planId, owner: req.user._id },
       { $set: updates },
-      { new: true }
+      { new: true },
     );
 
     if (!updatedPlan) {
