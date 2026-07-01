@@ -82,12 +82,26 @@ const UserSchema = new mongoose.Schema(
   {
     name: String,
     email: { type: String, unique: true, required: true },
-    phone: { type: String, unique: true },
+    notificationEmail: String,
+    // phone: { type: String, unique: true },
     password: { type: String, required: true },
     resetPasswordCode: String,
     resetPasswordExpires: Date,
     avatar: String,
     background: String,
+    reminders: [
+      {
+        id: String,
+        label: String,
+        date: String,
+        time: String,
+        advanceNotice: String,
+        advanceUnit: String,
+        isActive: Boolean,
+        triggered: Boolean,
+        createdAt: Date,
+      },
+    ],
     studyPlans: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -168,20 +182,18 @@ const authenticate = async (req, res, next) => {
 // Routes
 app.post("/api/register", async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, password } = req.body;
 
     // Validate input
-    if (!name || !email || !phone || !password) {
+    if (!name || !email || !password) {
       return res.status(400).json({ error: "All fields are required" });
     }
 
     // Check if email or phone already exists
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    const existingUser = await User.findOne({ $or: [{ email }] });
     if (existingUser) {
       if (existingUser.email === email) {
         return res.status(400).json({ error: "Email already in use" });
-      } else {
-        return res.status(400).json({ error: "Phone number already in use" });
       }
     }
 
@@ -192,7 +204,6 @@ app.post("/api/register", async (req, res) => {
     const user = new User({
       name,
       email,
-      phone,
       password: hashedPassword,
     });
 
@@ -208,7 +219,6 @@ app.post("/api/register", async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
-        phone: user.phone,
         background: user.background,
       },
       token,
@@ -400,30 +410,263 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 
+app.get("/api/reminders", authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json(user.reminders || []);
+  } catch (err) {
+    console.error("Error fetching reminders:", err);
+    res.status(500).json({ error: "Error fetching reminders" });
+  }
+});
+
+app.post("/api/reminders", authenticate, async (req, res) => {
+  try {
+    const { reminders } = req.body;
+
+    if (!Array.isArray(reminders)) {
+      return res.status(400).json({ error: "Reminders must be an array" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Update user's reminders
+    user.reminders = reminders;
+    await user.save();
+
+    res.json({
+      message: "Reminders saved successfully",
+      reminders: user.reminders,
+    });
+  } catch (err) {
+    console.error("Error saving reminders:", err);
+    res.status(500).json({ error: "Error saving reminders" });
+  }
+});
+
+app.post("/api/reminders/add", authenticate, async (req, res) => {
+  try {
+    const reminder = req.body;
+
+    if (!reminder.label || !reminder.date) {
+      return res.status(400).json({ error: "Label and date are required" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Add new reminder with timestamp
+    const newReminder = {
+      ...reminder,
+      createdAt: new Date().toISOString(),
+      triggered: false,
+    };
+
+    user.reminders.push(newReminder);
+    await user.save();
+
+    res.json({
+      message: "Reminder added successfully",
+      reminder: newReminder,
+    });
+  } catch (err) {
+    console.error("Error adding reminder:", err);
+    res.status(500).json({ error: "Error adding reminder" });
+  }
+});
+
+app.put("/api/reminders/:reminderId", authenticate, async (req, res) => {
+  try {
+    const { reminderId } = req.params;
+    const updates = req.body;
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Find and update the reminder
+    const reminderIndex = user.reminders.findIndex((r) => r.id === reminderId);
+    if (reminderIndex === -1) {
+      return res.status(404).json({ error: "Reminder not found" });
+    }
+
+    user.reminders[reminderIndex] = {
+      ...user.reminders[reminderIndex],
+      ...updates,
+    };
+    await user.save();
+
+    res.json({
+      message: "Reminder updated successfully",
+      reminder: user.reminders[reminderIndex],
+    });
+  } catch (err) {
+    console.error("Error updating reminder:", err);
+    res.status(500).json({ error: "Error updating reminder" });
+  }
+});
+
+// Delete a reminder
+app.delete("/api/reminders/:reminderId", authenticate, async (req, res) => {
+  try {
+    const { reminderId } = req.params;
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Remove the reminder
+    user.reminders = user.reminders.filter((r) => r.id !== reminderId);
+    await user.save();
+
+    res.json({
+      message: "Reminder deleted successfully",
+      reminders: user.reminders,
+    });
+  } catch (err) {
+    console.error("Error deleting reminder:", err);
+    res.status(500).json({ error: "Error deleting reminder" });
+  }
+});
+
+// Toggle reminder active status
+app.patch(
+  "/api/reminders/:reminderId/toggle",
+  authenticate,
+  async (req, res) => {
+    try {
+      const { reminderId } = req.params;
+
+      const user = await User.findById(req.user._id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const reminder = user.reminders.find((r) => r.id === reminderId);
+      if (!reminder) {
+        return res.status(404).json({ error: "Reminder not found" });
+      }
+
+      reminder.isActive = !reminder.isActive;
+      await user.save();
+
+      res.json({
+        message: "Reminder toggled successfully",
+        reminder,
+      });
+    } catch (err) {
+      console.error("Error toggling reminder:", err);
+      res.status(500).json({ error: "Error toggling reminder" });
+    }
+  },
+);
+
+app.post("/api/send-reminder", authenticate, async (req, res) => {
+  try {
+    const { reminderId, label, targetName, targetDate, reminderTime } =
+      req.body;
+    const user = req.user;
+
+    const notificationEmail = user.notificationEmail || user.email;
+
+    // Calculate time remaining
+    const now = new Date();
+    const target = new Date(targetDate);
+    const diffTime = target - now;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    const notifications = [];
+    let emailSent = false;
+
+    // Send Email notification
+    if (notificationEmail && user.emailNotifications !== false) {
+      try {
+        const mailOptions = {
+          to: notificationEmail,
+          from:
+            process.env.EMAIL_FROM ||
+            `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
+          subject: `⏰ Reminder: ${label || targetName} is approaching!`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #4361ee;">⏰ Reminder Alert</h2>
+              <p>Hello ${user.name || "User"},</p>
+              <p>This is a reminder for: <strong>"${label || targetName}"</strong></p>
+              <div style="background: #f0f4ff; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                <p style="margin: 0; font-size: 24px; font-weight: bold; color: #4361ee;">
+                  ${diffDays > 0 ? `${diffDays} days remaining` : "Today!"}
+                </p>
+              </div>
+              <p>Date & Time: ${new Date(targetDate).toLocaleString()}</p>
+              <p>Reminder: ${reminderTime || "At event time"}</p>
+              <p style="color: #666; font-size: 14px;">Stay focused and keep working towards your goal!</p>
+              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p style="color: #999; font-size: 12px;">This is an automated reminder from MindStreamer.</p>
+            </div>
+          `,
+          text: `⏰ Reminder Alert: ${label || targetName}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today!"}\nDate & Time: ${new Date(targetDate).toLocaleString()}\nReminder: ${reminderTime || "At event time"}`,
+        };
+
+        await transporter.sendMail(mailOptions);
+        emailSent = true;
+        notifications.push({ type: "email", sent: true });
+      } catch (err) {
+        console.error("Email sending failed:", err);
+        notifications.push({ type: "email", sent: false, error: err.message });
+      }
+    }
+
+    res.json({
+      message: "Reminder processed",
+      emailSent,
+      details: notifications,
+    });
+  } catch (err) {
+    console.error("Reminder error:", err);
+    res.status(500).json({
+      error: "Error sending reminder",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
+  }
+});
+
 // Add this route to your server
 app.put("/api/user/settings", authenticate, async (req, res) => {
-  console.log("setting req: ", req.body);
+  console.log("settings req: ", req.body);
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const {
-      name,
-      avatar,
-      emailNotifications,
-      mobileNotifications,
-      background,
-    } = req.body;
+    const { name, avatar, email, emailNotifications, background } = req.body;
 
     if (name) user.name = name;
     if (avatar) user.avatar = avatar;
     if (background !== undefined) user.background = background;
 
-    // Save additional settings if those fields exist in schema
+    if (email !== undefined) {
+      user.notificationEmail = email;
+    }
+
+    // if (email && email !== user.email) {
+    //   const existingUser = await User.findOne({ email });
+    //   if (existingUser && existingUser._id.toString() !== user._id.toString()) {
+    //     return res.status(400).json({ error: "Email already in use" });
+    //   }
+    //   user.email = email;
+    // }
+
     if (emailNotifications !== undefined)
       user.emailNotifications = emailNotifications;
-    if (mobileNotifications !== undefined)
-      user.mobileNotifications = mobileNotifications;
 
     await user.save();
 
@@ -433,8 +676,10 @@ app.put("/api/user/settings", authenticate, async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        notificationEmail: user.notificationEmail,
         avatar: user.avatar,
         background: user.background,
+        emailNotifications: user.emailNotifications,
       },
     });
   } catch (err) {
@@ -447,7 +692,11 @@ app.get("/api/user", authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate("studyPlans");
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(user);
+
+    const userData = user.toObject();
+    userData.notificationEmail = user.notificationEmail || user.email;
+    userData.reminders = user.reminders || [];
+    res.json(userData);
   } catch (err) {
     console.error("User fetch error:", err);
     res.status(500).json({ error: "Error fetching user data" });
