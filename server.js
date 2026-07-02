@@ -277,7 +277,7 @@ app.post("/api/guest-login", async (req, res) => {
     // Create a temporary guest user
     const guestUser = new User({
       name: "Guest User",
-      email: `guest-${Date.now()}@example.com`,
+      email: `guest-${Date.now()}`,
       password: await bcrypt.hash(Math.random().toString(36).slice(2), 10),
       isGuest: true,
     });
