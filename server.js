@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { getAdvanceMs } = require("./utils/reminderUtils");
 
 const app = express();
 
@@ -178,6 +179,153 @@ const authenticate = async (req, res, next) => {
     res.status(401).json({ error: "Invalid token" });
   }
 };
+
+async function sendReminderEmail(user, reminder) {
+  const notificationEmail = user.notificationEmail || user.email;
+
+  if (!notificationEmail || user.emailNotifications === false) {
+    return { sent: false, reason: "notifications disabled or no email" };
+  }
+
+  const targetDate = reminder.date;
+  const label = reminder.label;
+  const reminderTime = `${reminder.advanceNotice} ${reminder.advanceUnit} before`;
+
+  const now = new Date();
+  const target = new Date(`${reminder.date}T${reminder.time}`);
+  const diffTime = target - now;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  try {
+    const mailOptions = {
+      to: notificationEmail,
+      from:
+        process.env.EMAIL_FROM ||
+        `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
+      subject: `Reminder: ${label} is approaching`,
+      html: `
+    <!DOCTYPE html>
+    <html>
+      <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0000; padding:0 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+                <tr>
+                  <td style="background:linear-gradient(135deg,#4361ee,#3a0ca3); padding:32px 20px;">
+                    <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
+                    <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Reminder</h1>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px;">
+                    <p style="margin:0 0 8px; color:#1a1a2e; font-size:16px; line-height:1.6;">
+                      Hi ${user.name || "there"},
+                    </p>
+                    <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
+                      This is your reminder for <strong style="color:#1a1a2e;">"${label}"</strong>.
+                    </p>
+                    <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; margin-bottom:28px;">
+                      <p style="margin:0 0 6px; color:#3a0ca3; font-size:20px; font-weight:700;">
+                        ${diffDays > 0 ? `${diffDays} day${diffDays === 1 ? "" : "s"} remaining` : "Today"}
+                      </p>
+                      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; margin-top:16px; border-top:1px solid #e5e7eb;">
+                        <tr>
+                          <td style="padding-top:16px; color:#8a8f9c; font-size:13px;">Date & time</td>
+                          <td style="padding-top:16px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${target.toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding-top:8px; color:#8a8f9c; font-size:13px;">Notice</td>
+                          <td style="padding-top:8px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${reminderTime}</td>
+                        </tr>
+                      </table>
+                    </div>
+                    <p style="margin:0; color:#8a8f9c; font-size:13px; line-height:1.6;">
+                      Stay focused and keep working towards your goal.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 40px; background-color:#fafafa; border-top:1px solid #eeeeee;">
+                    <p style="margin:0; color:#a0a4b0; font-size:12px; text-align:center;">
+                      This is an automated reminder from MindStreamer.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `,
+      text: `Reminder: ${label}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today"}\nDate & Time: ${target.toLocaleString()}\nReminder: ${reminderTime}`,
+    };
+
+    await transporter.sendMail(mailOptions);
+    return { sent: true };
+  } catch (err) {
+    console.error(`Email sending failed for user ${user._id}:`, err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+async function checkDueReminders() {
+  const now = new Date();
+  const results = { checked: 0, triggered: 0, emailsSent: 0, errors: [] };
+
+  // Only pull users who actually have reminders, keep the query cheap
+  const users = await User.find({ "reminders.0": { $exists: true } });
+
+  for (const user of users) {
+    let userChanged = false;
+
+    for (const reminder of user.reminders) {
+      results.checked++;
+
+      if (!reminder.isActive || reminder.triggered) continue;
+
+      // Handle snooze expiry, mirroring the old client logic
+      if (reminder.snoozedUntil) {
+        const snoozeEnd = new Date(reminder.snoozedUntil);
+        if (now < snoozeEnd) continue; // still snoozed, skip
+        reminder.snoozedUntil = null;
+        reminder.triggered = true;
+        userChanged = true;
+        results.triggered++;
+
+        const emailResult = await sendReminderEmail(user, reminder);
+        if (emailResult.sent) results.emailsSent++;
+        else if (emailResult.error) results.errors.push(emailResult.error);
+        continue;
+      }
+
+      const advanceMs = getAdvanceMs(reminder);
+      const reminderDateTime = new Date(`${reminder.date}T${reminder.time}`);
+      const triggerTime = new Date(reminderDateTime.getTime() - advanceMs);
+
+      // Due if triggerTime has passed. No upper bound needed server-side
+      // since we run this every minute — nothing should ever be "missed"
+      // by more than a minute or two.
+      if (triggerTime <= now) {
+        reminder.triggered = true;
+        userChanged = true;
+        results.triggered++;
+
+        const emailResult = await sendReminderEmail(user, reminder);
+        if (emailResult.sent) results.emailsSent++;
+        else if (emailResult.error) results.errors.push(emailResult.error);
+      }
+    }
+
+    if (userChanged) {
+      user.markModified("reminders"); // needed since reminders is an array of subdocs
+      await user.save();
+    }
+  }
+
+  return results;
+}
 
 // Routes
 app.post("/api/register", async (req, res) => {
@@ -358,10 +506,52 @@ app.post("/api/forgot-password", async (req, res) => {
       from:
         process.env.EMAIL_FROM ||
         `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
-      subject: "Password Reset Code",
-      text: `Your password reset code is: ${code}\n\nThis code will expire in 10 minutes.`,
-      html: `<p>Your password reset code is: <strong>${code}</strong></p>
-             <p>This code will expire in 10 minutes.</p>`,
+      subject: "Your MindStreamer password reset code",
+      html: `
+    <!DOCTYPE html>
+    <html>
+      <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0000; padding:0 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+                <tr>
+                  <td style="background:linear-gradient(135deg,#4361ee,#3a0ca3); padding:32px 20px;">
+                    <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
+                    <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Password reset requested</h1>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px;">
+                    <p style="margin:0 0 8px; color:#1a1a2e; font-size:16px; line-height:1.6;">
+                      Hi ${user.name || "there"},
+                    </p>
+                    <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
+                      Use the code below to reset your password. This code is valid for the next 10 minutes.
+                    </p>
+                    <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; text-align:center; margin-bottom:28px;">
+                      <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#3a0ca3;">${code}</span>
+                    </div>
+                    <p style="margin:0; color:#8a8f9c; font-size:13px; line-height:1.6;">
+                      If you didn't request this, you can safely ignore this email — your password will remain unchanged.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 40px; background-color:#fafafa; border-top:1px solid #eeeeee;">
+                    <p style="margin:0; color:#a0a4b0; font-size:12px; text-align:center;">
+                      This is an automated message from MindStreamer. Please don't reply to this email.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `,
+      text: `Your MindStreamer password reset code is: ${code}\n\nThis code will expire in 10 minutes.\n\nIf you didn't request this, you can ignore this email.`,
     };
 
     console.log("mailOptions: ", mailOptions);
@@ -407,6 +597,25 @@ app.post("/api/reset-password", async (req, res) => {
   } catch (err) {
     console.error("Reset password error:", err);
     res.status(500).json({ error: "Error resetting password" });
+  }
+});
+
+app.post("/api/reminders/check", async (req, res) => {
+  const providedSecret = req.header("x-cron-secret") || req.query.secret || "";
+
+  if (providedSecret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const results = await checkDueReminders();
+    console.log(
+      `[reminders/check] ${new Date().toISOString()} — checked ${results.checked}, triggered ${results.triggered}, emails sent ${results.emailsSent}`,
+    );
+    res.json({ ok: true, ...results });
+  } catch (err) {
+    console.error("Error checking reminders:", err);
+    res.status(500).json({ error: "Error checking reminders" });
   }
 });
 
@@ -571,76 +780,129 @@ app.patch(
   },
 );
 
-app.post("/api/send-reminder", authenticate, async (req, res) => {
-  try {
-    const { reminderId, label, targetName, targetDate, reminderTime } =
-      req.body;
-    const user = req.user;
+// app.post("/api/send-reminder", authenticate, async (req, res) => {
+//   try {
+//     const { reminderId, label, targetName, targetDate, reminderTime } =
+//       req.body;
+//     const user = req.user;
 
-    const notificationEmail = user.notificationEmail || user.email;
+//     const notificationEmail = user.notificationEmail || user.email;
 
-    // Calculate time remaining
-    const now = new Date();
-    const target = new Date(targetDate);
-    const diffTime = target - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+//     // Calculate time remaining
+//     const now = new Date();
+//     const target = new Date(targetDate);
+//     const diffTime = target - now;
+//     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    const notifications = [];
-    let emailSent = false;
+//     const notifications = [];
+//     let emailSent = false;
 
-    // Send Email notification
-    if (notificationEmail && user.emailNotifications !== false) {
-      try {
-        const mailOptions = {
-          to: notificationEmail,
-          from:
-            process.env.EMAIL_FROM ||
-            `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
-          subject: `⏰ Reminder: ${label || targetName} is approaching!`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #4361ee;">⏰ Reminder Alert</h2>
-              <p>Hello ${user.name || "User"},</p>
-              <p>This is a reminder for: <strong>"${label || targetName}"</strong></p>
-              <div style="background: #f0f4ff; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                <p style="margin: 0; font-size: 24px; font-weight: bold; color: #4361ee;">
-                  ${diffDays > 0 ? `${diffDays} days remaining` : "Today!"}
-                </p>
-              </div>
-              <p>Date & Time: ${new Date(targetDate).toLocaleString()}</p>
-              <p>Reminder: ${reminderTime || "At event time"}</p>
-              <p style="color: #666; font-size: 14px;">Stay focused and keep working towards your goal!</p>
-              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-              <p style="color: #999; font-size: 12px;">This is an automated reminder from MindStreamer.</p>
-            </div>
-          `,
-          text: `⏰ Reminder Alert: ${label || targetName}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today!"}\nDate & Time: ${new Date(targetDate).toLocaleString()}\nReminder: ${reminderTime || "At event time"}`,
-        };
+//     // Send Email notification
+//     if (notificationEmail && user.emailNotifications !== false) {
+//       try {
+//         const mailOptions = {
+//           to: notificationEmail,
+//           from:
+//             process.env.EMAIL_FROM ||
+//             `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
+//           subject: `Reminder: ${label || targetName} is approaching`,
+//           html: `
+//     <!DOCTYPE html>
+//     <html>
+//       <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+//         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0000; padding:0 0;">
+//           <tr>
+//             <td align="center">
+//               <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+//                 <tr>
+//                   <td style="background:linear-gradient(135deg,#4361ee,#3a0ca3); padding:32px 20px;">
+//                     <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
+//                     <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Reminder</h1>
+//                   </td>
+//                 </tr>
+//                 <tr>
+//                   <td style="padding:20px;">
+//                     <p style="margin:0 0 8px; color:#1a1a2e; font-size:16px; line-height:1.6;">
+//                       Hi ${user.name || "there"},
+//                     </p>
+//                     <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
+//                       This is your reminder for <strong style="color:#1a1a2e;">"${label || targetName}"</strong>.
+//                     </p>
+//                     <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; margin-bottom:28px;">
+//                       <p style="margin:0 0 6px; color:#3a0ca3; font-size:20px; font-weight:700;">
+//                         ${diffDays > 0 ? `${diffDays} day${diffDays === 1 ? "" : "s"} remaining` : "Today"}
+//                       </p>
+//                       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; margin-top:16px; border-top:1px solid #e5e7eb;">
+//                         <tr>
+//                           <td style="padding-top:16px; color:#8a8f9c; font-size:13px;">Date & time</td>
+//                           <td style="padding-top:16px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${new Date(targetDate).toLocaleString()}</td>
+//                         </tr>
+//                         <tr>
+//                           <td style="padding-top:8px; color:#8a8f9c; font-size:13px;">Notice</td>
+//                           <td style="padding-top:8px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${reminderTime || "At event time"}</td>
+//                         </tr>
+//                       </table>
+//                     </div>
+//                     <p style="margin:0; color:#8a8f9c; font-size:13px; line-height:1.6;">
+//                       Stay focused and keep working towards your goal.
+//                     </p>
+//                   </td>
+//                 </tr>
+//                 <tr>
+//                   <td style="padding:24px 40px; background-color:#fafafa; border-top:1px solid #eeeeee;">
+//                     <p style="margin:0; color:#a0a4b0; font-size:12px; text-align:center;">
+//                       This is an automated reminder from MindStreamer.
+//                     </p>
+//                   </td>
+//                 </tr>
+//               </table>
+//             </td>
+//           </tr>
+//         </table>
+//       </body>
+//     </html>
+//   `,
+//           text: `Reminder: ${label || targetName}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today"}\nDate & Time: ${new Date(targetDate).toLocaleString()}\nReminder: ${reminderTime || "At event time"}`,
+//         };
 
-        await transporter.sendMail(mailOptions);
-        emailSent = true;
-        notifications.push({ type: "email", sent: true });
-      } catch (err) {
-        console.error("Email sending failed:", err);
-        notifications.push({ type: "email", sent: false, error: err.message });
-      }
-    }
+//         await transporter.sendMail(mailOptions);
+//         emailSent = true;
+//         notifications.push({ type: "email", sent: true });
+//       } catch (err) {
+//         console.error("Email sending failed:", err);
+//         notifications.push({ type: "email", sent: false, error: err.message });
+//       }
+//     }
 
-    res.json({
-      message: "Reminder processed",
-      emailSent,
-      details: notifications,
-    });
-  } catch (err) {
-    console.error("Reminder error:", err);
-    res.status(500).json({
-      error: "Error sending reminder",
-      details: process.env.NODE_ENV === "development" ? err.message : undefined,
-    });
-  }
-});
+//     res.json({
+//       message: "Reminder processed",
+//       emailSent,
+//       details: notifications,
+//     });
+//   } catch (err) {
+//     console.error("Reminder error:", err);
+//     res.status(500).json({
+//       error: "Error sending reminder",
+//       details: process.env.NODE_ENV === "development" ? err.message : undefined,
+//     });
+//   }
+// });
 
 // Add this route to your server
+
+app.post("/api/send-reminder", authenticate, async (req, res) => {
+  const { reminderId, label, targetName, targetDate, reminderTime } = req.body;
+  const user = req.user;
+  const result = await sendReminderEmail(user, {
+    label: label || targetName,
+    date: targetDate,
+    time: "00:00",
+    advanceNotice: 0,
+    advanceUnit: "hours",
+  });
+  res.json({ message: "Reminder processed", emailSent: result.sent, details: [result] });
+});
+
 app.put("/api/user/settings", authenticate, async (req, res) => {
   console.log("settings req: ", req.body);
   try {
@@ -958,3 +1220,5 @@ process.on("SIGINT", () => {
     });
   });
 });
+
+module.exports = { sendReminderEmail, checkDueReminders };
