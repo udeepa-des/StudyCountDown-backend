@@ -100,6 +100,8 @@ const UserSchema = new mongoose.Schema(
         advanceUnit: String,
         isActive: Boolean,
         triggered: Boolean,
+        snoozedUntil: Date,
+        triggerAt: String,
         createdAt: Date,
       },
     ],
@@ -286,17 +288,15 @@ async function checkDueReminders() {
       if (!reminder.isActive || reminder.triggered) continue;
 
       // Handle snooze expiry, mirroring the old client logic
-      if (reminder.snoozedUntil) {
-        const snoozeEnd = new Date(reminder.snoozedUntil);
-        if (now < snoozeEnd) continue; // still snoozed, skip
-        reminder.snoozedUntil = null;
-        reminder.triggered = true;
-        userChanged = true;
-        results.triggered++;
-
-        const emailResult = await sendReminderEmail(user, reminder);
-        if (emailResult.sent) results.emailsSent++;
-        else if (emailResult.error) results.errors.push(emailResult.error);
+      if (reminder.triggerAt) {
+        if (new Date(reminder.triggerAt) <= now) {
+          reminder.triggered = true;
+          userChanged = true;
+          results.triggered++;
+          const emailResult = await sendReminderEmail(user, reminder);
+          if (emailResult.sent) results.emailsSent++;
+          else if (emailResult.error) results.errors.push(emailResult.error);
+        }
         continue;
       }
 
