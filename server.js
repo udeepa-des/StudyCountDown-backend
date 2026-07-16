@@ -268,7 +268,7 @@ async function sendReminderEmail(user, reminder) {
       </body>
     </html>
   `,
-      text: `Reminder: ${label || targetName}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today"}\nDate & Time: ${new Date(targetDate).toLocaleString()}\nReminder: ${reminderTime || "At event time"}`,
+      text: `Reminder: ${label || targetName}\n\n${diffDays > 0 ? `${diffDays} days remaining` : "Today"}\nDate & Time: ${displayDateTime}\nReminder: ${reminderTime || "At event time"}`,
     };
 
     await transporter.sendMail(mailOptions);
