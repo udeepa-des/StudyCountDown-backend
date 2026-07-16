@@ -102,6 +102,8 @@ const UserSchema = new mongoose.Schema(
         triggered: Boolean,
         snoozedUntil: Date,
         triggerAt: String,
+        eventAt: String,
+        displayDateTime: String,
         createdAt: Date,
       },
     ],
@@ -189,13 +191,18 @@ async function sendReminderEmail(user, reminder) {
     return { sent: false, reason: "notifications disabled or no email" };
   }
 
-  const targetDate = reminder.date;
   const label = reminder.label;
   const reminderTime = `${reminder.advanceNotice} ${reminder.advanceUnit} before`;
 
+  // Use the browser-computed values — don't reparse date/time here
+  const eventAt = reminder.eventAt
+    ? new Date(reminder.eventAt)
+    : new Date(`${reminder.date}T${reminder.time}`); // fallback for old reminders only
+
+  const displayDateTime = reminder.displayDateTime || eventAt.toLocaleString();
+
   const now = new Date();
-  const target = new Date(`${reminder.date}T${reminder.time}`);
-  const diffTime = target - now;
+  const diffTime = eventAt - now;
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
   try {
@@ -225,7 +232,7 @@ async function sendReminderEmail(user, reminder) {
                       Hi ${user.name || "there"},
                     </p>
                     <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
-                      This is your reminder for <strong style="color:#1a1a2e;">"${label || targetName}"</strong>.
+                     This is your reminder for <strong style="color:#1a1a2e;">"${label}"</strong>.
                     </p>
                     <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; margin-bottom:28px;">
                       <p style="margin:0 0 6px; color:#3a0ca3; font-size:20px; font-weight:700;">
@@ -234,7 +241,7 @@ async function sendReminderEmail(user, reminder) {
                       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; margin-top:16px; border-top:1px solid #e5e7eb;">
                         <tr>
                           <td style="padding-top:16px; color:#8a8f9c; font-size:13px;">Date & time</td>
-                          <td style="padding-top:16px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${new Date(targetDate).toLocaleString()}</td>
+                          <td style="padding-top:16px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${displayDateTime}</td>
                         </tr>
                         <tr>
                           <td style="padding-top:8px; color:#8a8f9c; font-size:13px;">Notice</td>
