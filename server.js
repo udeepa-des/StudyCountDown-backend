@@ -221,7 +221,7 @@ async function sendReminderEmail(user, reminder) {
             <td align="center">
               <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06);">
                 <tr>
-                  <td style="background:linear-gradient(135deg,#4361ee,#3a0ca3); padding:32px 20px;">
+                  <td style="background:#4361ee; padding:32px 20px;">
                     <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
                     <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Reminder</h1>
                   </td>
@@ -515,49 +515,61 @@ app.post("/api/forgot-password", async (req, res) => {
         `noreply@${process.env.EMAIL_USER.split("@")[1]}`,
       subject: "Your MindStreamer password reset code",
       html: `
-    <!DOCTYPE html>
-    <html>
-      <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0000; padding:0 0;">
-          <tr>
-            <td align="center">
-              <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-                <tr>
-                  <td style="background:linear-gradient(135deg,#4361ee,#3a0ca3); padding:32px 20px;">
-                    <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
-                    <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Password reset requested</h1>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:20px;">
-                    <p style="margin:0 0 8px; color:#1a1a2e; font-size:16px; line-height:1.6;">
-                      Hi ${user.name || "there"},
-                    </p>
-                    <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
-                      Use the code below to reset your password. This code is valid for the next 10 minutes.
-                    </p>
-                    <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; text-align:center; margin-bottom:28px;">
-                      <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#3a0ca3;">${code}</span>
-                    </div>
-                    <p style="margin:0; color:#8a8f9c; font-size:13px; line-height:1.6;">
-                      If you didn't request this, you can safely ignore this email — your password will remain unchanged.
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:24px 40px; background-color:#fafafa; border-top:1px solid #eeeeee;">
-                    <p style="margin:0; color:#a0a4b0; font-size:12px; text-align:center;">
-                      This is an automated message from MindStreamer. Please don't reply to this email.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </body>
-    </html>
-  `,
+<!DOCTYPE html>
+<html>
+  <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:0; margin:0;">
+      <tr>
+        <td align="center" style="padding:40px 20px;">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 24px rgba(0,0,0,0.06); margin:0 auto;">
+            <tr>
+              <td style="background:#4361ee; padding:32px 20px;">
+                <p style="margin:0; color:#ffffff; font-size:15px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; opacity:0.85;">MindStreamer</p>
+                <h1 style="margin:8px 0 0; color:#ffffff; font-size:22px; font-weight:600;">Reminder</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px;">
+                <p style="margin:0 0 8px; color:#1a1a2e; font-size:16px; line-height:1.6;">
+                  Hi ${user.name || "there"},
+                </p>
+                <p style="margin:0 0 28px; color:#555b6e; font-size:15px; line-height:1.6;">
+                 This is your reminder for <strong style="color:#1a1a2e;">"${label}"</strong>.
+                </p>
+                <div style="background-color:#f4f5f7; border-radius:12px; padding:24px; margin-bottom:28px;">
+                  <p style="margin:0 0 6px; color:#3a0ca3; font-size:20px; font-weight:700;">
+                    ${diffDays > 0 ? `${diffDays} day${diffDays === 1 ? "" : "s"} remaining` : "Today"}
+                  </p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; margin-top:16px; border-top:1px solid #e5e7eb;">
+                    <tr>
+                      <td style="padding-top:16px; color:#8a8f9c; font-size:13px;">Date & time</td>
+                      <td style="padding-top:16px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${displayDateTime}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top:8px; color:#8a8f9c; font-size:13px;">Notice</td>
+                      <td style="padding-top:8px; color:#1a1a2e; font-size:13px; text-align:right; font-weight:600;">${reminderTime || "At event time"}</td>
+                    </tr>
+                  </table>
+                </div>
+                <p style="margin:0; color:#8a8f9c; font-size:13px; line-height:1.6;">
+                  Stay focused and keep working towards your goal.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 40px; background-color:#fafafa; border-top:1px solid #eeeeee;">
+                <p style="margin:0; color:#a0a4b0; font-size:12px; text-align:center;">
+                  This is an automated reminder from MindStreamer.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+`,
       text: `Your MindStreamer password reset code is: ${code}\n\nThis code will expire in 10 minutes.\n\nIf you didn't request this, you can ignore this email.`,
     };
 
