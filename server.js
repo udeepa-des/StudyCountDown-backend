@@ -107,6 +107,20 @@ const UserSchema = new mongoose.Schema(
         createdAt: Date,
       },
     ],
+    todos: [
+      {
+        id: String,
+        text: String,
+        completed: { type: Boolean, default: false },
+        priority: {
+          type: String,
+          enum: ["low", "medium", "high"],
+          default: "medium",
+        },
+        dueDate: String,
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     studyPlans: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -1173,6 +1187,117 @@ app.delete("/api/plans/:planId", authenticate, async (req, res) => {
   } catch (err) {
     console.error("Plan deletion error:", err);
     res.status(500).json({ error: "Error deleting plan" });
+  }
+});
+
+// Get all todos
+app.get("/api/todos", authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user.todos || []);
+  } catch (err) {
+    console.error("Error fetching todos:", err);
+    res.status(500).json({ error: "Error fetching todos" });
+  }
+});
+
+// Add a todo
+app.post("/api/todos", authenticate, async (req, res) => {
+  try {
+    const { text, priority, dueDate } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Task text is required" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const newTodo = {
+      id: Date.now().toString(),
+      text: text.trim(),
+      completed: false,
+      priority: priority || "medium",
+      dueDate: dueDate || null,
+      createdAt: new Date(),
+    };
+
+    user.todos.push(newTodo);
+    await user.save();
+
+    res.status(201).json(newTodo);
+  } catch (err) {
+    console.error("Error adding todo:", err);
+    res.status(500).json({ error: "Error adding todo" });
+  }
+});
+
+// Update a todo (text, priority, dueDate, completed)
+app.put("/api/todos/:todoId", authenticate, async (req, res) => {
+  try {
+    const { todoId } = req.params;
+    const updates = req.body;
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const todo = user.todos.find((t) => t.id === todoId);
+    if (!todo) return res.status(404).json({ error: "Todo not found" });
+
+    Object.assign(todo, updates);
+    user.markModified("todos");
+    await user.save();
+
+    res.json(todo);
+  } catch (err) {
+    console.error("Error updating todo:", err);
+    res.status(500).json({ error: "Error updating todo" });
+  }
+});
+
+// Toggle completed status
+app.patch("/api/todos/:todoId/toggle", authenticate, async (req, res) => {
+  try {
+    const { todoId } = req.params;
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const todo = user.todos.find((t) => t.id === todoId);
+    if (!todo) return res.status(404).json({ error: "Todo not found" });
+
+    todo.completed = !todo.completed;
+    user.markModified("todos");
+    await user.save();
+
+    res.json(todo);
+  } catch (err) {
+    console.error("Error toggling todo:", err);
+    res.status(500).json({ error: "Error toggling todo" });
+  }
+});
+
+// Delete a todo
+app.delete("/api/todos/:todoId", authenticate, async (req, res) => {
+  try {
+    const { todoId } = req.params;
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const before = user.todos.length;
+    user.todos = user.todos.filter((t) => t.id !== todoId);
+
+    if (user.todos.length === before) {
+      return res.status(404).json({ error: "Todo not found" });
+    }
+
+    await user.save();
+    res.json({ message: "Todo deleted successfully", todoId });
+  } catch (err) {
+    console.error("Error deleting todo:", err);
+    res.status(500).json({ error: "Error deleting todo" });
   }
 });
 
