@@ -1190,12 +1190,27 @@ app.delete("/api/plans/:planId", authenticate, async (req, res) => {
   }
 });
 
+// Priority ranking used to sort todos (lower number = higher priority)
+const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+
+const sortTodos = (todos) => {
+  return [...todos].sort((a, b) => {
+    const aPriority = PRIORITY_ORDER[a.priority] ?? PRIORITY_ORDER.medium;
+    const bPriority = PRIORITY_ORDER[b.priority] ?? PRIORITY_ORDER.medium;
+
+    if (aPriority !== bPriority) return aPriority - bPriority;
+
+    // Same priority: earlier createdAt first
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+};
+
 // Get all todos
 app.get("/api/todos", authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(user.todos || []);
+    res.json(sortTodos(user.todos || []));
   } catch (err) {
     console.error("Error fetching todos:", err);
     res.status(500).json({ error: "Error fetching todos" });
